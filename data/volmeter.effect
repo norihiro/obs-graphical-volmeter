@@ -1,0 +1,60 @@
+uniform float4x4 ViewProj;
+
+uniform float4 color_bg_nominal = {0.149, 0.498, 0.149, 1.0}; // dark green
+uniform float4 color_bg_warning = {0.498, 0.498, 0.149, 1.0}; // dark yellow
+uniform float4 color_bg_error   = {0.498, 0.149, 0.149, 1.0}; // dark red
+uniform float4 color_fg_nominal = {0.298, 1.000, 0.298, 1.0}; // bright green
+uniform float4 color_fg_warning = {1.0, 1.0, 0.298, 1.0}; // bright yellow
+uniform float4 color_fg_error   = {1.0, 0.298, 0.298, 1.0}; // bright red
+uniform float4 color_magnitude  = {0.0, 0.0, 0.0, 1.0}; // black
+
+uniform float mag_min;
+uniform float mag_size = 1.0;
+uniform float warning = -20.0;
+uniform float error = -9.0;
+uniform float mag;
+uniform float peak;
+uniform float peak_hold;
+
+struct VertIn {
+	float4 pos : POSITION;
+};
+
+struct VertOut {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertOut VSDefault(VertIn vert_in)
+{
+	VertOut vert_out;
+	vert_out.pos = mul(float4(vert_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv = float2(vert_in.pos.y * -0.5, 0.0);
+	return vert_out;
+}
+
+float4 PSDrawVolMeter(VertOut vert_in) : TARGET
+{
+	float db = vert_in.uv.x;
+	bool is_peak = db < peak;
+	bool is_mag = mag - mag_size * 0.5 <= db && db < mag + mag_size * 0.5;
+	bool is_peak_hold = peak_hold - mag_size <= db && db < peak_hold;
+	if (is_mag) {
+		return color_magnitude;
+	} else if (db < warning) {
+		return is_peak || is_peak_hold ? color_fg_nominal : color_bg_nominal;
+	} else if (db < error) {
+		return is_peak || is_peak_hold ? color_fg_warning : color_bg_warning;
+	} else {
+		return is_peak || is_peak_hold ? color_fg_error : color_bg_error;
+	}
+}
+
+technique DrawVolMeter
+{
+	pass
+	{
+		vertex_shader = VSDefault(vert_in);
+		pixel_shader  = PSDrawVolMeter(vert_in);
+	}
+}

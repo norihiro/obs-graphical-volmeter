@@ -2,10 +2,15 @@
 #include <obs-module.h>
 #include <util/platform.h>
 #include <util/threading.h>
+#include <graphics/matrix4.h>
 #include "plugin-macros.generated.h"
 #include "volmeter.h"
+#include "util.h"
 
 #define AGE_THRESHOLD 0.05f // [s]
+
+#define DISPLAY_WIDTH_PER_CHANNEL 2
+#define DISPLAY_HEIGHT_PER_DB 2
 
 static inline float clamp_flt(float x, float min, float max)
 {
@@ -23,6 +28,7 @@ struct channel_volume_s
 struct source_s
 {
 	obs_source_t *context;
+	gs_effect_t *effect;
 
 	// properties
 	int track;
@@ -101,13 +107,17 @@ static void *create(obs_data_t *settings, obs_source_t *source)
 		s->volumes[ch].peak_hold = -M_INFINITE;
 	}
 
+	obs_enter_graphics();
+	s->effect = create_effect_from_module_file("volmeter.effect");
+	obs_leave_graphics();
+
 	pthread_mutex_init(&s->mutex, NULL);
 
 	// TODO: Set by properties.
 	s->magnitude_attack_rate = 0.99f / 0.3f;
 	s->magnitude_min = -60.0f;
-	s->peak_decay_rate = 20.0f / 1.7f; // [dB/s]
-	s->peak_hold_duration = 20.0f;     // [s]
+	s->peak_decay_rate = 20.0f / 0.85f; // [dB/s]
+	s->peak_hold_duration = 20.0f;      // [s]
 
 	s->volmeter = volmeter_create();
 	if (!s->volmeter)
@@ -204,34 +214,61 @@ void tick(void *data, float duration)
 		tick_magnitude(s, &s->volumes[ch], current_magnitude[ch], duration);
 		tick_peak(s, &s->volumes[ch], current_peak[ch], duration);
 	}
+}
 
-	// TODO: Implement in video_render
-	for (uint32_t ch = 0; ch < 2; ch++) {
-		blog(LOG_INFO, "%s: mag=%0.1f peak=%0.1f peak_hold=%0.1f peak_hold_age=%0.3f", __func__,
-		     s->volumes[ch].display_magnitude, s->volumes[ch].display_peak, s->volumes[ch].peak_hold,
-		     s->volumes[ch].peak_hold_age);
-	}
+static uint32_t get_width(void *data)
+{
+	struct source_s *s = data;
+	return DISPLAY_WIDTH_PER_CHANNEL * volmeter_get_nr_channels(s->volmeter);
+}
+
+static uint32_t get_height(void *data)
+{
+	struct source_s *s = data;
+	return DISPLAY_HEIGHT_PER_DB * (uint32_t)-s->magnitude_min;
 }
 
 static void video_render(void *data, gs_effect_t *effect)
 {
 	UNUSED_PARAMETER(effect);
 	struct source_s *s = data;
-	(void)s; // TODO: Implement
-}
 
-static uint32_t get_width(void *data)
-{
-	struct source_s *s = data;
-	(void)s; // TODO: Implement
-	return 1;
-}
+	const uint32_t width = DISPLAY_WIDTH_PER_CHANNEL;
+	const uint32_t height = get_height(s);
 
-static uint32_t get_height(void *data)
-{
-	struct source_s *s = data;
-	(void)s; // TODO: Implement
-	return 1;
+	gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "mag_min"), s->magnitude_min);
+
+	const bool srgb_prev = gs_framebuffer_srgb_enabled();
+	gs_enable_framebuffer_srgb(false);
+	gs_blend_state_push();
+	gs_reset_blend_state();
+
+	const uint32_t channels = volmeter_get_nr_channels(s->volmeter);
+	for (uint32_t ch = 0; ch < channels; ch++) {
+		struct channel_volume_s *v = s->volumes + ch;
+
+		gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "mag"), v->display_magnitude);
+		gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "peak"), v->display_peak);
+		gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "peak_hold"), v->peak_hold);
+
+		gs_matrix_push();
+
+		struct matrix4 tr = {
+			{.ptr = {1.0f, 0.0f, 0.0f, 0.0f}},
+			{.ptr = {0.0f, 1.0f, 0.0f, 0.0f}},
+			{.ptr = {0.0f, 0.0f, 1.0f, 0.0f}},
+			{.ptr = {(float)(width * ch), 0.0f, 0.0f, 1.0f}},
+		};
+		gs_matrix_mul(&tr);
+
+		while (gs_effect_loop(s->effect, "DrawVolMeter"))
+			gs_draw_sprite(0, 0, width, height);
+
+		gs_matrix_pop();
+	}
+
+	gs_blend_state_pop();
+	gs_enable_framebuffer_srgb(srgb_prev);
 }
 
 static void audio_cb(void *param, size_t mix_idx, struct audio_data *data)

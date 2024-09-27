@@ -32,6 +32,7 @@ add_library(${PROJECT_NAME} MODULE
 	src/plugin-main.c
 	src/graphical-volmeter.c
 	src/volmeter.c
+	src/util.c
 )
 
 target_link_libraries(${PROJECT_NAME}
