@@ -2,10 +2,10 @@
 
 ## Introduction
 
-This plugin displays a volume meter as a video source.
+This plugin displays a volume meter of the main mix.
 
 ## Properties
 
-### Source
+### Track
 
-Choose an audio source.
+Choose the track of main mix.
