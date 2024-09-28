@@ -44,6 +44,14 @@ struct source_s
 	bool peak_decay_rate_default;
 	enum obs_peak_meter_type peak_meter_type;
 	bool peak_meter_type_default;
+	bool override_colors;
+	uint32_t color_bg_nominal;
+	uint32_t color_bg_warning;
+	uint32_t color_bg_error;
+	uint32_t color_fg_nominal;
+	uint32_t color_fg_warning;
+	uint32_t color_fg_error;
+	uint32_t color_magnitude;
 
 	// internal data
 	// thread: audio
@@ -116,20 +124,47 @@ static enum obs_peak_meter_type peak_meter_type_from_int(int value)
 	}
 }
 
+static inline uint32_t color_from_cfg(long long value)
+{
+	return (value & 0xFF) << 16 | (value & 0xFF00) | (value & 0xFF0000) >> 16 | 0xFF000000;
+}
+
 static void update_default_from_profile(void *data)
 {
 	struct source_s *s = data;
-	config_t *cfg = obs_frontend_get_profile_config();
-	if (!cfg)
+	config_t *profile = obs_frontend_get_profile_config();
+	if (!profile) {
+		blog(LOG_ERROR, "obs_frontend_get_profile_config returns NULL.");
 		return;
+	}
+
+#if LIBOBS_API_VER >= MAKE_SEMANTIC_VERSION(31, 0, 0)
+	config_t *user = obs_frontend_get_user_config();
+	if (!user) {
+		blog(LOG_ERROR, "obs_frontend_get_user_config returns NULL.");
+		return;
+	}
+#endif
 
 	obs_enter_graphics();
 
 	if (s->peak_decay_rate_default)
-		s->peak_decay_rate = (float)config_get_double(cfg, "Audio", "MeterDecayRate");
+		s->peak_decay_rate = (float)config_get_double(profile, "Audio", "MeterDecayRate");
 	bool peak_meter_type_default = s->peak_meter_type_default;
 	if (peak_meter_type_default)
-		s->peak_meter_type = peak_meter_type_from_int(config_get_int(cfg, "Audio", "PeakMeterType"));
+		s->peak_meter_type = peak_meter_type_from_int(config_get_int(profile, "Audio", "PeakMeterType"));
+
+#if LIBOBS_API_VER >= MAKE_SEMANTIC_VERSION(31, 0, 0)
+	s->override_colors = config_get_bool(user, "Accessibility", "OverrideColors");
+	if (s->override_colors) {
+		s->color_bg_nominal = color_from_cfg(config_get_int(user, "Accessibility", "MixerGreen"));
+		s->color_bg_warning = color_from_cfg(config_get_int(user, "Accessibility", "MixerYellow"));
+		s->color_bg_error = color_from_cfg(config_get_int(user, "Accessibility", "MixerRed"));
+		s->color_fg_nominal = color_from_cfg(config_get_int(user, "Accessibility", "MixerGreenActive"));
+		s->color_fg_warning = color_from_cfg(config_get_int(user, "Accessibility", "MixerYellowActive"));
+		s->color_fg_error = color_from_cfg(config_get_int(user, "Accessibility", "MixerRedActive"));
+	}
+#endif
 
 	obs_leave_graphics();
 
@@ -148,12 +183,9 @@ static void update(void *data, obs_data_t *settings)
 		s->track = track;
 	}
 
-	bool request_default = false;
-
 	double peak_decay_rate = obs_data_get_double(settings, "peak_decay_rate");
 	if (peak_decay_rate <= 0.0) {
 		s->peak_decay_rate_default = true;
-		request_default = true;
 	}
 	else {
 		s->peak_decay_rate_default = false;
@@ -163,7 +195,6 @@ static void update(void *data, obs_data_t *settings)
 	int peak_meter_type = (int)obs_data_get_int(settings, "peak_meter_type");
 	if (peak_meter_type == -1) {
 		s->peak_meter_type_default = true;
-		request_default = true;
 	}
 	else {
 		s->peak_meter_type_default = false;
@@ -171,8 +202,7 @@ static void update(void *data, obs_data_t *settings)
 		volmeter_set_peak_meter_type(s->volmeter, s->peak_meter_type);
 	}
 
-	if (request_default)
-		obs_queue_task(OBS_TASK_UI, update_default_from_profile, s, false);
+	obs_queue_task(OBS_TASK_UI, update_default_from_profile, s, false);
 }
 
 static void *create(obs_data_t *settings, obs_source_t *source)
@@ -331,6 +361,9 @@ static void video_render(void *data, gs_effect_t *effect)
 	UNUSED_PARAMETER(effect);
 	struct source_s *s = data;
 
+	if (!s->effect)
+		return;
+
 	const uint32_t width = DISPLAY_WIDTH_PER_CHANNEL;
 	const uint32_t height = get_height(s);
 
@@ -355,6 +388,21 @@ static void video_render(void *data, gs_effect_t *effect)
 			gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "warning"), -20.0f);
 			gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "error"), -9.0f);
 			break;
+		}
+
+		if (s->override_colors) {
+			gs_effect_set_color(gs_effect_get_param_by_name(s->effect, "color_bg_nominal"),
+					    s->color_bg_nominal);
+			gs_effect_set_color(gs_effect_get_param_by_name(s->effect, "color_bg_warning"),
+					    s->color_bg_warning);
+			gs_effect_set_color(gs_effect_get_param_by_name(s->effect, "color_bg_error"),
+					    s->color_bg_error);
+			gs_effect_set_color(gs_effect_get_param_by_name(s->effect, "color_fg_nominal"),
+					    s->color_fg_nominal);
+			gs_effect_set_color(gs_effect_get_param_by_name(s->effect, "color_fg_warning"),
+					    s->color_fg_warning);
+			gs_effect_set_color(gs_effect_get_param_by_name(s->effect, "color_fg_error"),
+					    s->color_fg_error);
 		}
 
 		gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "mag"), v->display_magnitude);
