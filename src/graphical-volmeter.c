@@ -1,12 +1,11 @@
 #include <inttypes.h>
 #include <obs-module.h>
-#include <obs-frontend-api.h>
 #include <util/platform.h>
 #include <util/threading.h>
-#include <util/config-file.h>
 #include <graphics/matrix4.h>
 #include "plugin-macros.generated.h"
 #include "volmeter.h"
+#include "global-config.h"
 #include "util.h"
 
 #define AGE_THRESHOLD 0.05f      // [s]
@@ -44,14 +43,6 @@ struct source_s
 	bool peak_decay_rate_default;
 	enum obs_peak_meter_type peak_meter_type;
 	bool peak_meter_type_default;
-	bool override_colors;
-	uint32_t color_bg_nominal;
-	uint32_t color_bg_warning;
-	uint32_t color_bg_error;
-	uint32_t color_fg_nominal;
-	uint32_t color_fg_warning;
-	uint32_t color_fg_error;
-	uint32_t color_magnitude;
 
 	// internal data
 	// thread: audio
@@ -75,7 +66,6 @@ struct source_s
 static void audio_cb(void *param, size_t mix_idx, struct audio_data *data);
 static void volume_cb(void *param, const float magnitude[MAX_AUDIO_CHANNELS], const float peak[MAX_AUDIO_CHANNELS],
 		      const float input_peak[MAX_AUDIO_CHANNELS]);
-static void frontend_save_cb(obs_data_t *save_data, bool saving, void *private_data);
 
 static const char *get_name(void *type_data)
 {
@@ -112,66 +102,6 @@ static void get_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "peak_meter_type", -1);
 }
 
-static enum obs_peak_meter_type peak_meter_type_from_int(int value)
-{
-	switch (value) {
-	case 0:
-		return SAMPLE_PEAK_METER;
-	case 1:
-		return TRUE_PEAK_METER;
-	default:
-		return SAMPLE_PEAK_METER;
-	}
-}
-
-static inline uint32_t color_from_cfg(long long value)
-{
-	return (value & 0xFF) << 16 | (value & 0xFF00) | (value & 0xFF0000) >> 16 | 0xFF000000;
-}
-
-static void update_default_from_profile(void *data)
-{
-	struct source_s *s = data;
-	config_t *profile = obs_frontend_get_profile_config();
-	if (!profile) {
-		blog(LOG_ERROR, "obs_frontend_get_profile_config returns NULL.");
-		return;
-	}
-
-#if LIBOBS_API_VER >= MAKE_SEMANTIC_VERSION(31, 0, 0)
-	config_t *user = obs_frontend_get_user_config();
-	if (!user) {
-		blog(LOG_ERROR, "obs_frontend_get_user_config returns NULL.");
-		return;
-	}
-#endif
-
-	obs_enter_graphics();
-
-	if (s->peak_decay_rate_default)
-		s->peak_decay_rate = (float)config_get_double(profile, "Audio", "MeterDecayRate");
-	bool peak_meter_type_default = s->peak_meter_type_default;
-	if (peak_meter_type_default)
-		s->peak_meter_type = peak_meter_type_from_int(config_get_int(profile, "Audio", "PeakMeterType"));
-
-#if LIBOBS_API_VER >= MAKE_SEMANTIC_VERSION(31, 0, 0)
-	s->override_colors = config_get_bool(user, "Accessibility", "OverrideColors");
-	if (s->override_colors) {
-		s->color_bg_nominal = color_from_cfg(config_get_int(user, "Accessibility", "MixerGreen"));
-		s->color_bg_warning = color_from_cfg(config_get_int(user, "Accessibility", "MixerYellow"));
-		s->color_bg_error = color_from_cfg(config_get_int(user, "Accessibility", "MixerRed"));
-		s->color_fg_nominal = color_from_cfg(config_get_int(user, "Accessibility", "MixerGreenActive"));
-		s->color_fg_warning = color_from_cfg(config_get_int(user, "Accessibility", "MixerYellowActive"));
-		s->color_fg_error = color_from_cfg(config_get_int(user, "Accessibility", "MixerRedActive"));
-	}
-#endif
-
-	obs_leave_graphics();
-
-	if (peak_meter_type_default)
-		volmeter_set_peak_meter_type(s->volmeter, s->peak_meter_type);
-}
-
 static void update(void *data, obs_data_t *settings)
 {
 	struct source_s *s = data;
@@ -195,18 +125,19 @@ static void update(void *data, obs_data_t *settings)
 	int peak_meter_type = (int)obs_data_get_int(settings, "peak_meter_type");
 	if (peak_meter_type == -1) {
 		s->peak_meter_type_default = true;
+		s->peak_meter_type = gcfg.peak_meter_type;
 	}
 	else {
 		s->peak_meter_type_default = false;
 		s->peak_meter_type = peak_meter_type_from_int(peak_meter_type);
-		volmeter_set_peak_meter_type(s->volmeter, s->peak_meter_type);
 	}
-
-	obs_queue_task(OBS_TASK_UI, update_default_from_profile, s, false);
+	volmeter_set_peak_meter_type(s->volmeter, s->peak_meter_type);
 }
 
 static void *create(obs_data_t *settings, obs_source_t *source)
 {
+	gcfg_inc();
+
 	struct source_s *s = bzalloc(sizeof(struct source_s));
 	s->context = source;
 	s->track = -1;
@@ -240,8 +171,6 @@ static void *create(obs_data_t *settings, obs_source_t *source)
 
 	volmeter_add_callback(s->volmeter, volume_cb, s);
 
-	obs_frontend_add_save_callback(frontend_save_cb, s);
-
 	return s;
 
 fail:
@@ -253,7 +182,7 @@ static void destroy(void *data)
 {
 	struct source_s *s = data;
 
-	obs_frontend_remove_save_callback(frontend_save_cb, s);
+	gcfg_dec();
 
 	if (s->track >= 0)
 		obs_remove_raw_audio_callback(s->track, audio_cb, s);
@@ -285,7 +214,8 @@ static inline void tick_peak(const struct source_s *s, struct channel_volume_s *
 		c->display_peak = peak;
 	}
 	else {
-		float decay = duration * s->peak_decay_rate;
+		float peak_decay_rate = s->peak_decay_rate_default ? gcfg.peak_decay_rate : s->peak_decay_rate;
+		float decay = duration * peak_decay_rate;
 		c->display_peak = clamp_flt(c->display_peak - decay, peak, 0.0f);
 	}
 
@@ -342,6 +272,11 @@ void tick(void *data, float duration)
 		tick_magnitude(s, &s->volumes[ch], current_magnitude[ch], duration);
 		tick_peak(s, &s->volumes[ch], current_peak[ch], duration);
 	}
+
+	if (s->peak_meter_type_default && s->peak_meter_type != gcfg.peak_meter_type) {
+		s->peak_meter_type = gcfg.peak_meter_type;
+		volmeter_set_peak_meter_type(s->volmeter, s->peak_meter_type);
+	}
 }
 
 static uint32_t get_width(void *data)
@@ -390,19 +325,19 @@ static void video_render(void *data, gs_effect_t *effect)
 			break;
 		}
 
-		if (s->override_colors) {
+		if (gcfg.override_colors) {
 			gs_effect_set_color(gs_effect_get_param_by_name(s->effect, "color_bg_nominal"),
-					    s->color_bg_nominal);
+					    gcfg.color_bg_nominal);
 			gs_effect_set_color(gs_effect_get_param_by_name(s->effect, "color_bg_warning"),
-					    s->color_bg_warning);
+					    gcfg.color_bg_warning);
 			gs_effect_set_color(gs_effect_get_param_by_name(s->effect, "color_bg_error"),
-					    s->color_bg_error);
+					    gcfg.color_bg_error);
 			gs_effect_set_color(gs_effect_get_param_by_name(s->effect, "color_fg_nominal"),
-					    s->color_fg_nominal);
+					    gcfg.color_fg_nominal);
 			gs_effect_set_color(gs_effect_get_param_by_name(s->effect, "color_fg_warning"),
-					    s->color_fg_warning);
+					    gcfg.color_fg_warning);
 			gs_effect_set_color(gs_effect_get_param_by_name(s->effect, "color_fg_error"),
-					    s->color_fg_error);
+					    gcfg.color_fg_error);
 		}
 
 		gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "mag"), v->display_magnitude);
@@ -468,16 +403,6 @@ static void volume_cb(void *param, const float magnitude[MAX_AUDIO_CHANNELS], co
 	s->current_volume_updated = true;
 
 	pthread_mutex_unlock(&s->mutex);
-}
-
-static void frontend_save_cb(obs_data_t *save_data, bool saving, void *private_data)
-{
-	/* When the settings has been changed, this callback will be called. */
-	UNUSED_PARAMETER(save_data);
-	if (!saving)
-		return;
-
-	update_default_from_profile(private_data);
 }
 
 const struct obs_source_info volmeter_source_info = {
