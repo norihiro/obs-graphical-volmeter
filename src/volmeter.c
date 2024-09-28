@@ -320,7 +320,6 @@ void volmeter_push_audio_data(volmeter_t *volmeter, const struct audio_data *dat
 {
 	float magnitude[MAX_AUDIO_CHANNELS];
 	float peak[MAX_AUDIO_CHANNELS];
-	float input_peak[MAX_AUDIO_CHANNELS];
 
 	pthread_mutex_lock(&volmeter->mutex);
 
@@ -329,15 +328,11 @@ void volmeter_push_audio_data(volmeter_t *volmeter, const struct audio_data *dat
 	for (int channel_nr = 0; channel_nr < MAX_AUDIO_CHANNELS; channel_nr++) {
 		magnitude[channel_nr] = mul_to_db(volmeter->magnitude[channel_nr]);
 		peak[channel_nr] = mul_to_db(volmeter->peak[channel_nr]);
-
-		/* The input-peak is NOT adjusted with volume, so that the user
-		 * can check the input-gain. */
-		input_peak[channel_nr] = mul_to_db(volmeter->peak[channel_nr]);
 	}
 
 	pthread_mutex_unlock(&volmeter->mutex);
 
-	signal_levels_updated(volmeter, magnitude, peak, input_peak);
+	signal_levels_updated(volmeter, magnitude, peak, peak);
 }
 
 volmeter_t *volmeter_create()
