@@ -189,10 +189,10 @@ void tick(void *data, float duration)
 	float current_peak[MAX_AUDIO_CHANNELS];
 
 	pthread_mutex_lock(&s->mutex);
+	memcpy(current_magnitude, s->current_magnitude, sizeof(float) * MAX_AUDIO_CHANNELS);
+	memcpy(current_peak, s->current_peak, sizeof(float) * MAX_AUDIO_CHANNELS);
 	bool updated = s->current_volume_updated;
 	if (updated) {
-		memcpy(current_magnitude, s->current_magnitude, sizeof(float) * MAX_AUDIO_CHANNELS);
-		memcpy(current_peak, s->current_peak, sizeof(float) * MAX_AUDIO_CHANNELS);
 		s->current_volume_updated = false;
 		s->current_volume_age = 0;
 	}
