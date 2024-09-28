@@ -7,7 +7,8 @@
 #include "volmeter.h"
 #include "util.h"
 
-#define AGE_THRESHOLD 0.05f // [s]
+#define AGE_THRESHOLD 0.05f      // [s]
+#define CLIP_FLASH_DURATION 1.0f // [s]
 
 #define DISPLAY_WIDTH_PER_CHANNEL 2
 #define DISPLAY_HEIGHT_PER_DB 2
@@ -23,6 +24,8 @@ struct channel_volume_s
 	float display_peak;
 	float peak_hold;
 	float peak_hold_age;
+	bool clip_flash;
+	float clip_flash_age;
 };
 
 struct source_s
@@ -179,6 +182,17 @@ static inline void tick_peak(const struct source_s *s, struct channel_volume_s *
 	else {
 		c->peak_hold_age += duration;
 	}
+
+	if (c->clip_flash) {
+		if (c->clip_flash_age >= CLIP_FLASH_DURATION)
+			c->clip_flash = false;
+		else
+			c->clip_flash_age += duration;
+	}
+	if (peak >= 0.0f && !c->clip_flash) {
+		c->clip_flash = true;
+		c->clip_flash_age = 0.0f;
+	}
 }
 
 void tick(void *data, float duration)
@@ -248,7 +262,8 @@ static void video_render(void *data, gs_effect_t *effect)
 		struct channel_volume_s *v = s->volumes + ch;
 
 		gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "mag"), v->display_magnitude);
-		gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "peak"), v->display_peak);
+		gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "peak"),
+				    v->clip_flash ? 0.0f : v->display_peak);
 		gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "peak_hold"), v->peak_hold);
 
 		gs_matrix_push();
