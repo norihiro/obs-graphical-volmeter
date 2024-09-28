@@ -1,7 +1,9 @@
 #include <inttypes.h>
 #include <obs-module.h>
+#include <obs-frontend-api.h>
 #include <util/platform.h>
 #include <util/threading.h>
+#include <util/config-file.h>
 #include <graphics/matrix4.h>
 #include "plugin-macros.generated.h"
 #include "volmeter.h"
@@ -39,6 +41,9 @@ struct source_s
 	float magnitude_min;
 	float peak_decay_rate;
 	float peak_hold_duration;
+	bool peak_decay_rate_default;
+	enum obs_peak_meter_type peak_meter_type;
+	bool peak_meter_type_default;
 
 	// internal data
 	// thread: audio
@@ -49,6 +54,8 @@ struct source_s
 	pthread_mutex_t mutex;
 	float current_magnitude[MAX_AUDIO_CHANNELS];
 	float current_peak[MAX_AUDIO_CHANNELS];
+
+	// last updated time information
 	bool current_volume_updated;
 	float current_volume_age;
 
@@ -60,6 +67,7 @@ struct source_s
 static void audio_cb(void *param, size_t mix_idx, struct audio_data *data);
 static void volume_cb(void *param, const float magnitude[MAX_AUDIO_CHANNELS], const float peak[MAX_AUDIO_CHANNELS],
 		      const float input_peak[MAX_AUDIO_CHANNELS]);
+static void frontend_save_cb(obs_data_t *save_data, bool saving, void *private_data);
 
 static const char *get_name(void *type_data)
 {
@@ -71,15 +79,62 @@ static obs_properties_t *get_properties(void *data)
 {
 	UNUSED_PARAMETER(data);
 	obs_properties_t *props = obs_properties_create();
+	obs_property_t *prop;
 
 	obs_properties_add_int(props, "track", obs_module_text("Prop.Track"), 0, MAX_AUDIO_MIXES - 1, 1);
+
+	prop = obs_properties_add_list(props, "peak_decay_rate", obs_module_text("Prop.PeakDecayRate"),
+				       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_FLOAT);
+	obs_property_list_add_float(prop, obs_module_text("Prop.PeakDecayRate.Default"), 0.0);
+	obs_property_list_add_float(prop, obs_module_text("Prop.PeakDecayRate.Fast"), 20.0 / 0.85); // [dB/s]
+	obs_property_list_add_float(prop, obs_module_text("Prop.PeakDecayRate.Medium"), 20.0 / 1.7);
+	obs_property_list_add_float(prop, obs_module_text("Prop.PeakDecayRate.Slow"), 20.0 / 2.333);
+
+	prop = obs_properties_add_list(props, "peak_meter_type", obs_module_text("Prop.PeakMeterType"),
+				       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(prop, obs_module_text("Prop.PeakMeterType.Default"), -1);
+	obs_property_list_add_int(prop, obs_module_text("Prop.PeakMeterType.SamplePeak"), 0);
+	obs_property_list_add_int(prop, obs_module_text("Prop.PeakMeterType.TruePeak"), 1);
 
 	return props;
 }
 
 static void get_defaults(obs_data_t *settings)
 {
-	UNUSED_PARAMETER(settings);
+	obs_data_set_default_int(settings, "peak_meter_type", -1);
+}
+
+static enum obs_peak_meter_type peak_meter_type_from_int(int value)
+{
+	switch (value) {
+	case 0:
+		return SAMPLE_PEAK_METER;
+	case 1:
+		return TRUE_PEAK_METER;
+	default:
+		return SAMPLE_PEAK_METER;
+	}
+}
+
+static void update_default_from_profile(void *data)
+{
+	struct source_s *s = data;
+	config_t *cfg = obs_frontend_get_profile_config();
+	if (!cfg)
+		return;
+
+	obs_enter_graphics();
+
+	if (s->peak_decay_rate_default)
+		s->peak_decay_rate = (float)config_get_double(cfg, "Audio", "MeterDecayRate");
+	bool peak_meter_type_default = s->peak_meter_type_default;
+	if (peak_meter_type_default)
+		s->peak_meter_type = peak_meter_type_from_int(config_get_int(cfg, "Audio", "PeakMeterType"));
+
+	obs_leave_graphics();
+
+	if (peak_meter_type_default)
+		volmeter_set_peak_meter_type(s->volmeter, s->peak_meter_type);
 }
 
 static void update(void *data, obs_data_t *settings)
@@ -92,6 +147,32 @@ static void update(void *data, obs_data_t *settings)
 		obs_add_raw_audio_callback(track, NULL, audio_cb, s);
 		s->track = track;
 	}
+
+	bool request_default = false;
+
+	double peak_decay_rate = obs_data_get_double(settings, "peak_decay_rate");
+	if (peak_decay_rate <= 0.0) {
+		s->peak_decay_rate_default = true;
+		request_default = true;
+	}
+	else {
+		s->peak_decay_rate_default = false;
+		s->peak_decay_rate = (float)peak_decay_rate;
+	}
+
+	int peak_meter_type = (int)obs_data_get_int(settings, "peak_meter_type");
+	if (peak_meter_type == -1) {
+		s->peak_meter_type_default = true;
+		request_default = true;
+	}
+	else {
+		s->peak_meter_type_default = false;
+		s->peak_meter_type = peak_meter_type_from_int(peak_meter_type);
+		volmeter_set_peak_meter_type(s->volmeter, s->peak_meter_type);
+	}
+
+	if (request_default)
+		obs_queue_task(OBS_TASK_UI, update_default_from_profile, s, false);
 }
 
 static void *create(obs_data_t *settings, obs_source_t *source)
@@ -116,7 +197,6 @@ static void *create(obs_data_t *settings, obs_source_t *source)
 
 	pthread_mutex_init(&s->mutex, NULL);
 
-	// TODO: Set by properties.
 	s->magnitude_attack_rate = 0.99f / 0.3f;
 	s->magnitude_min = -60.0f;
 	s->peak_decay_rate = 20.0f / 0.85f; // [dB/s]
@@ -130,6 +210,8 @@ static void *create(obs_data_t *settings, obs_source_t *source)
 
 	volmeter_add_callback(s->volmeter, volume_cb, s);
 
+	obs_frontend_add_save_callback(frontend_save_cb, s);
+
 	return s;
 
 fail:
@@ -140,6 +222,8 @@ fail:
 static void destroy(void *data)
 {
 	struct source_s *s = data;
+
+	obs_frontend_remove_save_callback(frontend_save_cb, s);
 
 	if (s->track >= 0)
 		obs_remove_raw_audio_callback(s->track, audio_cb, s);
@@ -250,8 +334,6 @@ static void video_render(void *data, gs_effect_t *effect)
 	const uint32_t width = DISPLAY_WIDTH_PER_CHANNEL;
 	const uint32_t height = get_height(s);
 
-	gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "mag_min"), s->magnitude_min);
-
 	const bool srgb_prev = gs_framebuffer_srgb_enabled();
 	gs_enable_framebuffer_srgb(false);
 	gs_blend_state_push();
@@ -260,6 +342,20 @@ static void video_render(void *data, gs_effect_t *effect)
 	const uint32_t channels = volmeter_get_nr_channels(s->volmeter);
 	for (uint32_t ch = 0; ch < channels; ch++) {
 		struct channel_volume_s *v = s->volumes + ch;
+
+		gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "mag_min"), s->magnitude_min);
+
+		switch (s->peak_meter_type) {
+		case TRUE_PEAK_METER:
+			gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "warning"), -13.0f);
+			gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "error"), -2.0f);
+			break;
+		case SAMPLE_PEAK_METER:
+		default:
+			gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "warning"), -20.0f);
+			gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "error"), -9.0f);
+			break;
+		}
 
 		gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "mag"), v->display_magnitude);
 		gs_effect_set_float(gs_effect_get_param_by_name(s->effect, "peak"),
@@ -324,6 +420,16 @@ static void volume_cb(void *param, const float magnitude[MAX_AUDIO_CHANNELS], co
 	s->current_volume_updated = true;
 
 	pthread_mutex_unlock(&s->mutex);
+}
+
+static void frontend_save_cb(obs_data_t *save_data, bool saving, void *private_data)
+{
+	/* When the settings has been changed, this callback will be called. */
+	UNUSED_PARAMETER(save_data);
+	if (!saving)
+		return;
+
+	update_default_from_profile(private_data);
 }
 
 const struct obs_source_info volmeter_source_info = {
