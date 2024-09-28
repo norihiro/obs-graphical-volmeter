@@ -83,7 +83,7 @@ static void update(void *data, obs_data_t *settings)
 {
 	struct source_s *s = data;
 
-	int track = obs_data_get_int(settings, "track");
+	int track = (int)obs_data_get_int(settings, "track");
 	if (track != s->track && 0 <= track && track < MAX_AUDIO_MIXES) {
 		obs_remove_raw_audio_callback(s->track, audio_cb, s);
 		obs_add_raw_audio_callback(track, NULL, audio_cb, s);
@@ -283,7 +283,7 @@ static void audio_cb(void *param, size_t mix_idx, struct audio_data *data)
 	/* Need to align the audio data */
 	struct audio_data ad = *data;
 
-	uint32_t planes = audio_output_get_planes(audio);
+	uint32_t planes = (uint32_t)audio_output_get_planes(audio);
 	da_resize(s->buffer, sizeof(float) * AUDIO_OUTPUT_FRAMES * planes);
 
 	for (uint32_t i = 0; i < planes; i++) {
