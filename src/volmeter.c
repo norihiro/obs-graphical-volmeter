@@ -250,9 +250,8 @@ static void volmeter_process_peak(volmeter_t *volmeter, const struct audio_data 
 			continue;
 		}
 		if (((uintptr_t)samples & 0xf) > 0) {
-			printf("Audio plane %i is not aligned %p skipping "
-			       "peak volume measurement.\n",
-			       plane_nr, samples);
+			blog(LOG_WARNING, "Audio plane %i is not aligned %p skipping peak volume measurement.",
+			     plane_nr, samples);
 			volmeter->peak[channel_nr] = 1.0;
 			channel_nr++;
 			continue;
