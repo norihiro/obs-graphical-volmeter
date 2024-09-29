@@ -4,8 +4,11 @@
 #include "global-config.h"
 #include "util.h"
 
+#define LABEL_IMAGE_FILE_NAME "labels.png"
+
 static volatile int refcnt = 0;
 struct global_config_s gcfg = {0};
+gs_image_file_t label_image = {0};
 
 static inline uint32_t color_from_cfg(long long value)
 {
@@ -62,6 +65,18 @@ static void gcfg_inc_defer_ui(void *data)
 	UNUSED_PARAMETER(data);
 	gcfg_update();
 	obs_frontend_add_save_callback(frontend_save_cb, NULL);
+
+	if (!label_image.loaded) {
+		char *f = obs_module_file(LABEL_IMAGE_FILE_NAME);
+		gs_image_file_init(&label_image, f);
+		if (!label_image.loaded)
+			blog(LOG_ERROR, "Cannot load '" LABEL_IMAGE_FILE_NAME "' (%s)", f);
+		bfree(f);
+
+		obs_enter_graphics();
+		gs_image_file_init_texture(&label_image);
+		obs_leave_graphics();
+	}
 }
 
 void gcfg_inc()
@@ -74,6 +89,10 @@ static void gcfg_dec_defer_ui(void *data)
 {
 	UNUSED_PARAMETER(data);
 	obs_frontend_remove_save_callback(frontend_save_cb, NULL);
+
+	obs_enter_graphics();
+	gs_image_file_free(&label_image);
+	obs_leave_graphics();
 }
 
 void gcfg_dec()

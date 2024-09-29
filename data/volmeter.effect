@@ -29,7 +29,7 @@ VertOut VSDefault(VertIn vert_in)
 {
 	VertOut vert_out;
 	vert_out.pos = mul(float4(vert_in.pos.xyz, 1.0), ViewProj);
-	vert_out.uv = float2(vert_in.pos.y * -0.5, 0.0);
+	vert_out.uv = float2(vert_in.pos.y * -0.125, 0.0);
 	return vert_out;
 }
 

@@ -11,8 +11,9 @@
 #define AGE_THRESHOLD 0.05f      // [s]
 #define CLIP_FLASH_DURATION 1.0f // [s]
 
-#define DISPLAY_WIDTH_PER_CHANNEL 2
-#define DISPLAY_HEIGHT_PER_DB 2
+#define DISPLAY_WIDTH_PER_CHANNEL 16
+#define DISPLAY_HEIGHT_PER_DB 8
+#define N_LABELS 13
 
 static inline float clamp_flt(float x, float min, float max)
 {
@@ -61,6 +62,7 @@ struct source_s
 	// internal data
 	// thread: graphics
 	struct channel_volume_s volumes[MAX_AUDIO_CHANNELS];
+	gs_vertbuffer_t *label_vbuf;
 };
 
 static void audio_cb(void *param, size_t mix_idx, struct audio_data *data);
@@ -184,6 +186,12 @@ static void destroy(void *data)
 
 	gcfg_dec();
 
+	if (s->label_vbuf) {
+		obs_enter_graphics();
+		gs_vertexbuffer_destroy(s->label_vbuf);
+		obs_leave_graphics();
+	}
+
 	if (s->track >= 0)
 		obs_remove_raw_audio_callback(s->track, audio_cb, s);
 
@@ -282,13 +290,97 @@ void tick(void *data, float duration)
 static uint32_t get_width(void *data)
 {
 	struct source_s *s = data;
-	return DISPLAY_WIDTH_PER_CHANNEL * volmeter_get_nr_channels(s->volmeter);
+	return DISPLAY_WIDTH_PER_CHANNEL * volmeter_get_nr_channels(s->volmeter) + label_image.cx;
 }
 
 static uint32_t get_height(void *data)
 {
 	struct source_s *s = data;
 	return DISPLAY_HEIGHT_PER_DB * (uint32_t)-s->magnitude_min;
+}
+
+static gs_vertbuffer_t *create_vbuf(uint32_t n)
+{
+	struct gs_vb_data *vrect = gs_vbdata_create();
+	vrect->num = n;
+	vrect->points = bzalloc(sizeof(struct vec3) * n);
+	vrect->num_tex = 1;
+	vrect->tvarray = bzalloc(sizeof(struct gs_tvertarray));
+	vrect->tvarray[0].width = 2;
+	vrect->tvarray[0].array = bzalloc(sizeof(struct vec2) * n);
+
+	return gs_vertexbuffer_create(vrect, GS_DYNAMIC);
+}
+
+static inline void set_v3_rect(struct vec3 *a, float x, float y, float w, float h)
+{
+	vec3_set(a + 0, x, y, 0.0f);
+	vec3_set(a + 1, x + w, y, 0.0f);
+	vec3_set(a + 2, x, y + h, 0.0f);
+	vec3_set(a + 3, x, y + h, 0.0f);
+	vec3_set(a + 4, x + w, y, 0.0f);
+	vec3_set(a + 5, x + w, y + h, 0.0f);
+}
+
+static inline void set_v2_uv(struct vec2 *a, float u, float v, float u2, float v2)
+{
+	vec2_set(a + 0, u, v);
+	vec2_set(a + 1, u2, v);
+	vec2_set(a + 2, u, v2);
+	vec2_set(a + 3, u, v2);
+	vec2_set(a + 4, u2, v);
+	vec2_set(a + 5, u2, v2);
+}
+
+static void draw_vbuf(gs_texture_t *tex, gs_vertbuffer_t *vbuf, uint32_t vbuf_size)
+{
+	gs_effect_t *effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
+	gs_technique_t *tech = gs_effect_get_technique(effect, "Draw");
+	gs_eparam_t *image = gs_effect_get_param_by_name(effect, "image");
+
+	gs_vertexbuffer_flush(vbuf);
+	gs_load_vertexbuffer(vbuf);
+	gs_load_indexbuffer(NULL);
+
+	size_t passes = gs_technique_begin(tech);
+	for (size_t i = 0; i < passes; i++) {
+		if (gs_technique_begin_pass(tech, i)) {
+			gs_effect_set_texture(image, tex);
+			gs_draw(GS_TRIS, 0, vbuf_size);
+			gs_technique_end_pass(tech);
+		}
+	}
+	gs_technique_end(tech);
+}
+
+static inline void render_labels(struct source_s *s, uint32_t height)
+{
+	if (!label_image.texture)
+		return;
+
+	const uint32_t vbuf_size = N_LABELS * 6;
+	if (!s->label_vbuf) {
+		s->label_vbuf = create_vbuf(vbuf_size);
+		if (!s->label_vbuf) {
+			blog(LOG_ERROR, "Failed to create vbuf");
+			return;
+		}
+	}
+
+	struct gs_vb_data *vdata = gs_vertexbuffer_get_data(s->label_vbuf);
+	struct vec2 *tvarray = vdata->tvarray[0].array;
+
+	int label_cx = label_image.cx;
+	int label_cy = label_image.cy / N_LABELS;
+	for (int i = 0; i < N_LABELS; i++) {
+		float x = 0.0f;
+		float y = height * i / (float)(N_LABELS - 1) - label_cy * 0.5f;
+
+		set_v3_rect(vdata->points + i * 6, x, y, label_cx, label_cy);
+		set_v2_uv(tvarray + i * 6, 0.0f, i / (float)N_LABELS, 1.f, (i + 1) / (float)N_LABELS);
+	}
+
+	draw_vbuf(label_image.texture, s->label_vbuf, vbuf_size);
 }
 
 static void video_render(void *data, gs_effect_t *effect)
@@ -357,6 +449,22 @@ static void video_render(void *data, gs_effect_t *effect)
 
 		while (gs_effect_loop(s->effect, "DrawVolMeter"))
 			gs_draw_sprite(0, 0, width, height);
+
+		gs_matrix_pop();
+	}
+
+	{
+		gs_matrix_push();
+
+		struct matrix4 tr = {
+			{.ptr = {1.0f, 0.0f, 0.0f, 0.0f}},
+			{.ptr = {0.0f, 1.0f, 0.0f, 0.0f}},
+			{.ptr = {0.0f, 0.0f, 1.0f, 0.0f}},
+			{.ptr = {(float)(width * channels), 0.0f, 0.0f, 1.0f}},
+		};
+		gs_matrix_mul(&tr);
+
+		render_labels(s, height);
 
 		gs_matrix_pop();
 	}

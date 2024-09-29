@@ -1,5 +1,6 @@
 #pragma once
 #include <obs.h>
+#include <graphics/image-file.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,6 +23,8 @@ struct global_config_s
 extern struct global_config_s gcfg;
 void gcfg_inc();
 void gcfg_dec();
+
+extern gs_image_file_t label_image;
 
 #ifdef __cplusplus
 }
