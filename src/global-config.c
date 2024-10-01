@@ -37,6 +37,13 @@ static void gcfg_update()
 		blog(LOG_ERROR, "obs_frontend_get_user_config returns NULL.");
 		return;
 	}
+#else
+	config_t *user = obs_frontend_get_global_config();
+	if (!user) {
+		blog(LOG_ERROR, "obs_frontend_get_global_config returns NULL.");
+		return;
+	}
+#endif
 
 	c.override_colors = config_get_bool(user, "Accessibility", "OverrideColors");
 	c.color_bg_nominal = color_from_cfg(config_get_int(user, "Accessibility", "MixerGreen"));
@@ -45,7 +52,6 @@ static void gcfg_update()
 	c.color_fg_nominal = color_from_cfg(config_get_int(user, "Accessibility", "MixerGreenActive"));
 	c.color_fg_warning = color_from_cfg(config_get_int(user, "Accessibility", "MixerYellowActive"));
 	c.color_fg_error = color_from_cfg(config_get_int(user, "Accessibility", "MixerRedActive"));
-#endif
 
 	obs_enter_graphics();
 	gcfg = c;
