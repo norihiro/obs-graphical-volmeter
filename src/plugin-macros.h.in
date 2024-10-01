@@ -25,6 +25,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define ID_PREFIX "@ID_PREFIX@"
 
 #cmakedefine WITH_ASSERT_THREAD
+#cmakedefine WITH_FRONTEND_USER_CONFIG
 
 #define blog(level, msg, ...) blog(level, "[" PLUGIN_NAME "] " msg, ##__VA_ARGS__)
 

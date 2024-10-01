@@ -14,6 +14,7 @@ set(LINUX_MAINTAINER_EMAIL "norihiro@nagater.net")
 
 option(WITH_ASSERT_THREAD "Enable thread assertion" OFF)
 option(ENABLE_COVERAGE "Enable coverage option for GCC" OFF)
+option(WITH_FRONTEND_USER_CONFIG "Set ON if compiling against 2635cf3a2a or later and before 31.0.0" OFF)
 
 # In case you need C++
 set(CMAKE_CXX_STANDARD 11)
