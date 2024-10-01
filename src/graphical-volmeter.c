@@ -13,6 +13,7 @@
 
 #define DISPLAY_WIDTH_PER_CHANNEL 16
 #define DISPLAY_HEIGHT_PER_DB 8
+#define LABEL_IMAGE_WIDTH 48
 #define N_LABELS 13
 
 static inline float clamp_flt(float x, float min, float max)
@@ -290,7 +291,7 @@ void tick(void *data, float duration)
 static uint32_t get_width(void *data)
 {
 	struct source_s *s = data;
-	return DISPLAY_WIDTH_PER_CHANNEL * volmeter_get_nr_channels(s->volmeter) + label_image.cx;
+	return DISPLAY_WIDTH_PER_CHANNEL * volmeter_get_nr_channels(s->volmeter) + LABEL_IMAGE_WIDTH;
 }
 
 static uint32_t get_height(void *data)
@@ -372,6 +373,9 @@ static inline void render_labels(struct source_s *s, uint32_t height)
 
 	int label_cx = label_image.cx;
 	int label_cy = label_image.cy / N_LABELS;
+	if (label_cx != LABEL_IMAGE_WIDTH)
+		blog(LOG_WARNING, "Expected label image width %d, got %d", LABEL_IMAGE_WIDTH, label_cx);
+
 	for (int i = 0; i < N_LABELS; i++) {
 		float x = 0.0f;
 		float y = height * i / (float)(N_LABELS - 1) - label_cy * 0.5f;
