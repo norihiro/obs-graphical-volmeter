@@ -12,6 +12,8 @@ set(PLUGIN_URL "https://github.com/norihiro/obs-graphical-volmeter/")
 
 set(LINUX_MAINTAINER_EMAIL "norihiro@nagater.net")
 
+option(WITH_ASSERT_THREAD "Enable thread assertion" OFF)
+
 # In case you need C++
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

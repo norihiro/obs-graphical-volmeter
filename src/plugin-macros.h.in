@@ -24,8 +24,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define PLUGIN_VERSION "@PROJECT_VERSION@"
 #define ID_PREFIX "@ID_PREFIX@"
 
-#cmakedefine USE_FFMPEG_SWRESAMPLE
-#cmakedefine USE_ERIKD_LIBSAMPLERATE
+#cmakedefine WITH_ASSERT_THREAD
 
 #define blog(level, msg, ...) blog(level, "[" PLUGIN_NAME "] " msg, ##__VA_ARGS__)
 

@@ -105,10 +105,8 @@ static void get_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "peak_meter_type", -1);
 }
 
-static void update(void *data, obs_data_t *settings)
+static void update_internal(struct source_s *s, obs_data_t *settings)
 {
-	struct source_s *s = data;
-
 	int track = (int)obs_data_get_int(settings, "track");
 	if (track != s->track && 0 <= track && track < MAX_AUDIO_MIXES) {
 		obs_remove_raw_audio_callback(s->track, audio_cb, s);
@@ -135,6 +133,12 @@ static void update(void *data, obs_data_t *settings)
 		s->peak_meter_type = peak_meter_type_from_int(peak_meter_type);
 	}
 	volmeter_set_peak_meter_type(s->volmeter, s->peak_meter_type);
+}
+
+static void update(void *data, obs_data_t *settings)
+{
+	ASSERT_THREAD(OBS_TASK_GRAPHICS);
+	update_internal(data, settings);
 }
 
 static void *create(obs_data_t *settings, obs_source_t *source)
@@ -170,7 +174,7 @@ static void *create(obs_data_t *settings, obs_source_t *source)
 	if (!s->volmeter)
 		goto fail;
 
-	update(s, settings);
+	update_internal(s, settings);
 
 	volmeter_add_callback(s->volmeter, volume_cb, s);
 
@@ -250,6 +254,7 @@ static inline void tick_peak(const struct source_s *s, struct channel_volume_s *
 
 void tick(void *data, float duration)
 {
+	ASSERT_THREAD(OBS_TASK_GRAPHICS);
 	struct source_s *s = data;
 
 	float current_magnitude[MAX_AUDIO_CHANNELS];
@@ -389,6 +394,7 @@ static inline void render_labels(struct source_s *s, uint32_t height)
 
 static void video_render(void *data, gs_effect_t *effect)
 {
+	ASSERT_GRAPHICS_CONTEXT();
 	UNUSED_PARAMETER(effect);
 	struct source_s *s = data;
 
@@ -479,6 +485,7 @@ static void video_render(void *data, gs_effect_t *effect)
 
 static void audio_cb(void *param, size_t mix_idx, struct audio_data *data)
 {
+	ASSERT_THREAD(OBS_TASK_AUDIO);
 	UNUSED_PARAMETER(mix_idx);
 	struct source_s *s = param;
 
@@ -505,6 +512,7 @@ static void audio_cb(void *param, size_t mix_idx, struct audio_data *data)
 static void volume_cb(void *param, const float magnitude[MAX_AUDIO_CHANNELS], const float peak[MAX_AUDIO_CHANNELS],
 		      const float input_peak[MAX_AUDIO_CHANNELS])
 {
+	ASSERT_THREAD(OBS_TASK_AUDIO);
 	UNUSED_PARAMETER(input_peak);
 	struct source_s *s = param;
 

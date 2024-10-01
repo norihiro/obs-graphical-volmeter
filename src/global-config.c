@@ -19,6 +19,7 @@ static inline uint32_t color_from_cfg(long long value)
 
 static void gcfg_update()
 {
+	ASSERT_THREAD(OBS_TASK_UI);
 	config_t *profile = obs_frontend_get_profile_config();
 	if (!profile) {
 		blog(LOG_ERROR, "obs_frontend_get_profile_config returns NULL.");
@@ -72,6 +73,7 @@ static void run_in_ui(obs_task_t task, void *param)
 
 static void gcfg_inc_defer_ui(void *data)
 {
+	ASSERT_THREAD(OBS_TASK_UI);
 	UNUSED_PARAMETER(data);
 	gcfg_update();
 	obs_frontend_add_save_callback(frontend_save_cb, NULL);
@@ -98,6 +100,7 @@ void gcfg_inc()
 
 static void gcfg_dec_defer_ui(void *data)
 {
+	ASSERT_THREAD(OBS_TASK_UI);
 	UNUSED_PARAMETER(data);
 	obs_frontend_remove_save_callback(frontend_save_cb, NULL);
 
