@@ -13,6 +13,8 @@
 
 #define DISPLAY_WIDTH_PER_CHANNEL 16
 #define DISPLAY_HEIGHT_PER_DB 8
+#define DISPLAY_PADDING 16
+#define DISPLAY_CHANNEL_SPACING 4
 #define LABEL_IMAGE_WIDTH 48
 #define N_LABELS 13
 
@@ -296,13 +298,14 @@ void tick(void *data, float duration)
 static uint32_t get_width(void *data)
 {
 	struct source_s *s = data;
-	return DISPLAY_WIDTH_PER_CHANNEL * volmeter_get_nr_channels(s->volmeter) + LABEL_IMAGE_WIDTH;
+	return (DISPLAY_WIDTH_PER_CHANNEL + DISPLAY_CHANNEL_SPACING) * volmeter_get_nr_channels(s->volmeter) +
+	       LABEL_IMAGE_WIDTH + DISPLAY_PADDING * 2 - DISPLAY_CHANNEL_SPACING;
 }
 
 static uint32_t get_height(void *data)
 {
 	struct source_s *s = data;
-	return DISPLAY_HEIGHT_PER_DB * (uint32_t)-s->magnitude_min;
+	return DISPLAY_HEIGHT_PER_DB * (uint32_t)-s->magnitude_min + DISPLAY_PADDING * 2;
 }
 
 static gs_vertbuffer_t *create_vbuf(uint32_t n)
@@ -402,12 +405,27 @@ static void video_render(void *data, gs_effect_t *effect)
 		return;
 
 	const uint32_t width = DISPLAY_WIDTH_PER_CHANNEL;
-	const uint32_t height = get_height(s);
+	const uint32_t height = DISPLAY_HEIGHT_PER_DB * (uint32_t)-s->magnitude_min;
 
 	const bool srgb_prev = gs_framebuffer_srgb_enabled();
 	gs_enable_framebuffer_srgb(false);
 	gs_blend_state_push();
 	gs_reset_blend_state();
+
+	{
+		effect = obs_get_base_effect(OBS_EFFECT_SOLID);
+		gs_effect_set_color(gs_effect_get_param_by_name(effect, "color"), 0x80000000);
+		const float w = (float)get_width(s);
+		const float h = (float)get_height(s);
+		while (gs_effect_loop(effect, "Solid")) {
+			gs_render_start(false);
+			gs_vertex2f(0.0f, h);
+			gs_vertex2f(0.0f, 0.0f);
+			gs_vertex2f(w, h);
+			gs_vertex2f(w, 0.0f);
+			gs_render_stop(GS_TRISTRIP);
+		}
+	}
 
 	const uint32_t channels = volmeter_get_nr_channels(s->volmeter);
 	for (uint32_t ch = 0; ch < channels; ch++) {
@@ -453,7 +471,8 @@ static void video_render(void *data, gs_effect_t *effect)
 			{.ptr = {1.0f, 0.0f, 0.0f, 0.0f}},
 			{.ptr = {0.0f, 1.0f, 0.0f, 0.0f}},
 			{.ptr = {0.0f, 0.0f, 1.0f, 0.0f}},
-			{.ptr = {(float)(width * ch), 0.0f, 0.0f, 1.0f}},
+			{.ptr = {(float)((width + DISPLAY_CHANNEL_SPACING) * ch + DISPLAY_PADDING),
+				 (float)DISPLAY_PADDING, 0.0f, 1.0f}},
 		};
 		gs_matrix_mul(&tr);
 
@@ -470,7 +489,9 @@ static void video_render(void *data, gs_effect_t *effect)
 			{.ptr = {1.0f, 0.0f, 0.0f, 0.0f}},
 			{.ptr = {0.0f, 1.0f, 0.0f, 0.0f}},
 			{.ptr = {0.0f, 0.0f, 1.0f, 0.0f}},
-			{.ptr = {(float)(width * channels), 0.0f, 0.0f, 1.0f}},
+			{.ptr = {(float)((width + DISPLAY_CHANNEL_SPACING) * channels + DISPLAY_PADDING -
+					 DISPLAY_CHANNEL_SPACING),
+				 (float)DISPLAY_PADDING, 0.0f, 1.0f}},
 		};
 		gs_matrix_mul(&tr);
 
