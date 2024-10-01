@@ -13,6 +13,7 @@ set(PLUGIN_URL "https://github.com/norihiro/obs-graphical-volmeter/")
 set(LINUX_MAINTAINER_EMAIL "norihiro@nagater.net")
 
 option(WITH_ASSERT_THREAD "Enable thread assertion" OFF)
+option(ENABLE_COVERAGE "Enable coverage option for GCC" OFF)
 
 # In case you need C++
 set(CMAKE_CXX_STANDARD 11)
@@ -59,6 +60,10 @@ if(OS_LINUX)
 	target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra)
 	target_link_options(${PROJECT_NAME} PRIVATE -Wl,-z,defs)
 	target_link_libraries(${PROJECT_NAME} m)
+	if(ENABLE_COVERAGE)
+		target_compile_options(${PROJECT_NAME} PRIVATE -coverage)
+		target_link_options(${PROJECT_NAME} PRIVATE -coverage)
+	endif()
 endif()
 
 if(APPLE)
