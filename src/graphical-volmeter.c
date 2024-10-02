@@ -389,7 +389,7 @@ static inline void render_labels(struct source_s *s, uint32_t height)
 		float x = 0.0f;
 		float y = height * i / (float)(N_LABELS - 1) - label_cy * 0.5f;
 
-		set_v3_rect(vdata->points + i * 6, x, y, label_cx, label_cy);
+		set_v3_rect(vdata->points + i * 6, x, y, (float)label_cx, (float)label_cy);
 		set_v2_uv(tvarray + i * 6, 0.0f, i / (float)N_LABELS, 1.f, (i + 1) / (float)N_LABELS);
 	}
 

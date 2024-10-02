@@ -29,7 +29,7 @@ static void gcfg_update()
 	struct global_config_s c = gcfg;
 
 	c.peak_decay_rate = (float)config_get_double(profile, "Audio", "MeterDecayRate");
-	c.peak_meter_type = peak_meter_type_from_int(config_get_int(profile, "Audio", "PeakMeterType"));
+	c.peak_meter_type = peak_meter_type_from_int((int)config_get_int(profile, "Audio", "PeakMeterType"));
 
 #if LIBOBS_API_VER >= MAKE_SEMANTIC_VERSION(31, 0, 0) || defined(WITH_FRONTEND_USER_CONFIG)
 	config_t *user = obs_frontend_get_user_config();
