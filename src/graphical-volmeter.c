@@ -84,7 +84,7 @@ static obs_properties_t *get_properties(void *data)
 	obs_properties_t *props = obs_properties_create();
 	obs_property_t *prop;
 
-	obs_properties_add_int(props, "track", obs_module_text("Prop.Track"), 0, MAX_AUDIO_MIXES - 1, 1);
+	obs_properties_add_int(props, "track", obs_module_text("Prop.Track"), 1, MAX_AUDIO_MIXES, 1);
 
 	prop = obs_properties_add_list(props, "peak_decay_rate", obs_module_text("Prop.PeakDecayRate"),
 				       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_FLOAT);
@@ -104,12 +104,13 @@ static obs_properties_t *get_properties(void *data)
 
 static void get_defaults(obs_data_t *settings)
 {
+	obs_data_set_default_int(settings, "track", 1);
 	obs_data_set_default_int(settings, "peak_meter_type", -1);
 }
 
 static void update_internal(struct source_s *s, obs_data_t *settings)
 {
-	int track = (int)obs_data_get_int(settings, "track");
+	int track = (int)obs_data_get_int(settings, "track") - 1;
 	if (track != s->track && 0 <= track && track < MAX_AUDIO_MIXES) {
 		obs_remove_raw_audio_callback(s->track, audio_cb, s);
 		obs_add_raw_audio_callback(track, NULL, audio_cb, s);
