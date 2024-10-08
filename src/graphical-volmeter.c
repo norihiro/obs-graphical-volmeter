@@ -311,6 +311,7 @@ static uint32_t get_height(void *data)
 
 static gs_vertbuffer_t *create_vbuf(uint32_t n)
 {
+	assert(n > 0);
 	struct gs_vb_data *vrect = gs_vbdata_create();
 	vrect->num = n;
 	vrect->points = bzalloc(sizeof(struct vec3) * n);
